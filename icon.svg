@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Pixiv auto download">
+  <rect width="64" height="64" rx="14" fill="#0096fa"/>
+  <path fill="#ffffff" d="M15.3 8.6H31.2C44.6 8.6 51.7 15 51.7 24.9C51.7 34.7 44.6 41.1 31.2 41.1H27.8V55.4H15.3Z"/>
+  <path d="M35.2 18.6v11.6" stroke="#0096fa" stroke-width="6.4" stroke-linecap="round"/>
+  <path d="M30.2 25.4 35.2 30.4l5-5" fill="none" stroke="#0096fa" stroke-width="6.4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
