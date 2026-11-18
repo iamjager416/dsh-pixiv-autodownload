@@ -101,7 +101,7 @@ async function tick(logger) {
 // ---------------------------------------------------------------- 文案
 
 function renderArtists(rows) {
-  if (rows.length === 0) return '还没有画师。到「设置 → Pixiv 画师同步」里填 ID 或主页链接。'
+  if (rows.length === 0) return '还没有画师。到「设置 → Pixiv 自动下载」里填 ID 或主页链接。'
   return rows
     .map(
       (r) =>
