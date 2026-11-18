@@ -1,6 +1,6 @@
 {
   "name": "dsh-pixiv-autodownload",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Incremental Pixiv downloader for a fixed artist list. Remembers artist IDs and downloaded files, so a sync only fetches what is new.",
   "license": "MIT",
