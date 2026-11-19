@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Pixiv 自动下载",
-    "description": "按你指定的画师自动下载 Pixiv 新作品，下过的自动跳过。",
+    "description": "按你指定的画师自动下载 Pixiv 新作品，下过的自动跳过；每轮结果可推到 QQ。",
     "detail": "docs/DETAIL.md"
   }
 }

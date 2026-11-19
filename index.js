@@ -30,6 +30,15 @@ import {
 
 import { parseArtistIds, registerApi } from './lib/api.js'
 import { lock } from './lib/lock.js'
+import {
+  describeNotify,
+  formatLocal,
+  loadNotify,
+  normalizeTarget,
+  pushSyncResult,
+  saveNotify,
+  sendTestMessage,
+} from './lib/notify.js'
 
 export const name = 'dsh-pixiv-autodownload'
 
@@ -58,7 +67,7 @@ function dueNow(schedule, now = new Date()) {
   return now >= target
 }
 
-async function runScheduled() {
+async function runScheduled(log = () => {}) {
   if (lock.busy) return null
   lock.busy = true
   const dir = getDataDir()
@@ -75,7 +84,12 @@ async function runScheduled() {
         seconds: result.seconds,
       },
     })
+    // 定时跑完把摘要推到 QQ；没配置推送时 pushSyncResult 直接跳过
+    await pushSyncResult(dir, { mode: 'auto', result, log })
     return result
+  } catch (err) {
+    await pushSyncResult(dir, { mode: 'auto', error: err, log })
+    throw err
   } finally {
     lock.busy = false
   }
@@ -86,8 +100,9 @@ async function tick(logger) {
   const schedule = getSchedule(getDataDir())
   if (!dueNow(schedule)) return
   logger?.info?.(`pixiv-sync 定时同步开始（每天 ${schedule.time}）`)
+  const say = (message) => (logger?.info ? logger.info(message) : logger?.debug?.(message))
   try {
-    const result = await runScheduled()
+    const result = await runScheduled(say)
     if (result) {
       logger?.info?.(
         `pixiv-sync 定时同步完成：新增 ${result.works} 个作品 / ${result.files} 张，失败 ${result.failed}`
@@ -105,17 +120,19 @@ function renderArtists(rows) {
   return rows
     .map(
       (r) =>
-        `${r.enabled ? '✓' : '✗'} ${r.id} ${r.name || '(未命名)'} — 作品 ${r.works}，文件 ${r.files}，上次同步 ${r.last_sync_at || '从未'}`
+        `${r.enabled ? '✓' : '✗'} ${r.id} ${r.name || '(未命名)'} — 作品 ${r.works}，文件 ${r.files}，上次同步 ${r.last_sync_at ? formatLocal(r.last_sync_at) : '从未'}`
     )
     .join('\n')
 }
 
 function renderSchedule(s) {
   const pieces = [`定时：${s.enabled ? '已启用' : '已停用'}，每天 ${s.time}（本机时区）`]
-  pieces.push(`上次自动运行：${s.lastRunAt || '从未'}`)
+  pieces.push(`上次自动运行：${s.lastRunAt ? formatLocal(s.lastRunAt) : '从未'}`)
   if (s.lastResult) {
     const r = s.lastResult
-    pieces.push(`  上次结果：新增 ${r.works} 个作品 / ${r.files} 张，失败 ${r.failed}，耗时 ${r.seconds}s`)
+    pieces.push(
+      `${r.failed > 0 ? '❌' : '✅'}  上次结果：新增 ${r.works} 个作品 / ${r.files} 张，失败 ${r.failed}，耗时 ${r.seconds}s`
+    )
   }
   return pieces.join('\n')
 }
@@ -137,7 +154,9 @@ async function runAction(args) {
 
 ${renderArtists(s.artists)}
 
-${renderSchedule(getSchedule(dir))}`
+${renderSchedule(getSchedule(dir))}
+
+${describeNotify(loadNotify(dir))}`
   }
 
   if (action === 'run') {
@@ -154,6 +173,9 @@ ${renderSchedule(getSchedule(dir))}`
         full: Boolean(args.full),
         log: (m) => lines.push(m),
       })
+    } catch (err) {
+      await pushSyncResult(dir, { mode: 'manual', error: err, log: (m) => lines.push(m) })
+      throw err
     } finally {
       lock.busy = false
     }
@@ -161,6 +183,9 @@ ${renderSchedule(getSchedule(dir))}`
       `\n===== 汇总 =====\n画师 ${result.artists}，新增作品 ${result.works}，新增图片 ${result.files}，跳过 ${result.skipped}，失败 ${result.failed}，共 ${(result.bytes / 1024 / 1024).toFixed(1)} MB，耗时 ${result.seconds}s`
     )
     if (!result.cookie) lines.push('（未配置 cookie，R18 与私密作品看不到）')
+    const pushed = await pushSyncResult(dir, { mode: 'manual', result })
+    if (pushed?.skipped) lines.push('QQ 推送：未启用（设置页「QQ 推送」里填 AppID / AppSecret / openid）')
+    else if (pushed) lines.push(pushed.ok ? `✅ QQ 推送：已发送 ${pushed.sent} 条` : `❌ QQ 推送失败：${pushed.errors.join(' | ')}`)
     return lines.join('\n')
   }
 
@@ -237,6 +262,28 @@ ${renderSchedule(getSchedule(dir))}`
     return `${merged.folderTemplate} / ${merged.fileTemplate}.{ext}\n输出目录：${merged.outputDir}`
   }
 
+  if (action === 'notify_get') return describeNotify(loadNotify(dir))
+
+  if (action === 'notify_set') {
+    const patch = {}
+    if (args.pushEnabled !== undefined) patch.enabled = Boolean(args.pushEnabled)
+    if (args.appId !== undefined) patch.appId = String(args.appId).trim()
+    if (args.appSecret !== undefined) patch.appSecret = String(args.appSecret).trim()
+    if (args.target !== undefined) patch.target = normalizeTarget(args.target)
+    if (Object.keys(patch).length === 0) return '需要 pushEnabled、appId、appSecret 或 target。'
+    saveNotify(dir, patch)
+    return describeNotify(loadNotify(dir))
+  }
+
+  if (action === 'push_test') {
+    try {
+      const out = await sendTestMessage(dir)
+      return `✅ 已发送测试消息（${out.sent} 条）。${describeNotify(loadNotify(dir))}`
+    } catch (err) {
+      return `❌ 推送测试失败：${err.message}`
+    }
+  }
+
   if (action === 'adopt') {
     const r = adoptExisting(openDb(dir), config.outputDir)
     return `扫描完成：${r.artists} 个画师目录，${r.files} 个文件已入库`
@@ -263,7 +310,7 @@ export function apply(ctx) {
     defineTool({
       name: 'pixiv_sync',
       description:
-        'Incremental Pixiv downloader for a fixed artist list. Remembers artist IDs and downloaded files in its own SQLite database, so a sync only fetches works it has never seen. It runs its own daily schedule while DSH is open. Settings (artists, cookie, schedule, naming, manual sync) live in the plugin\'s section under DSH Settings. Actions: run, status, list_artists, add_artist, remove_artist, enable_artist, disable_artist, set_cookie, adopt, schedule_get, schedule_set, set_naming.',
+        'Incremental Pixiv downloader for a fixed artist list. Remembers artist IDs and downloaded files in its own SQLite database, so a sync only fetches works it has never seen. It runs its own daily schedule while DSH is open. Settings (artists, cookie, schedule, naming, QQ push, manual sync) live in the plugin\'s section under DSH Settings. Every sync (scheduled or manual) can be pushed to QQ through the official QQ bot HTTP API. Actions: run, status, list_artists, add_artist, remove_artist, enable_artist, disable_artist, set_cookie, adopt, schedule_get, schedule_set, set_naming, notify_get, notify_set, push_test.',
       parameters: {
         action: {
           type: 'string',
@@ -281,6 +328,9 @@ export function apply(ctx) {
             'schedule_get',
             'schedule_set',
             'set_naming',
+            'notify_get',
+            'notify_set',
+            'push_test',
           ],
           description: 'Which operation to perform.',
         },
@@ -311,6 +361,17 @@ export function apply(ctx) {
         folderTemplate: { type: 'string', description: 'For set_naming: folder template, e.g. "{user}-{uid}".' },
         fileTemplate: { type: 'string', description: 'For set_naming: filename template, e.g. "{id}_p{page}-{title}".' },
         outputDir: { type: 'string', description: 'For set_naming: absolute path of the download root folder.' },
+        pushEnabled: { type: 'boolean', description: 'For notify_set: turn QQ push of sync results on or off.' },
+        appId: { type: 'string', description: 'For notify_set: QQ bot AppID used to push sync results.' },
+        appSecret: {
+          type: 'string',
+          description: 'For notify_set: QQ bot AppSecret (stored locally in notify.json, never echoed back).',
+        },
+        target: {
+          type: 'string',
+          description:
+            'For notify_set: the QQ conversation to push to — your own c2c openid, or group:<group_openid>. A bare openid is treated as c2c.',
+        },
       },
       output: {
         schema: { type: 'string' },

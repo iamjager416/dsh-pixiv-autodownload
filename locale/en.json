@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Pixiv auto download",
-    "description": "Downloads new works from the Pixiv artists you choose, skipping anything already downloaded.",
+    "description": "Downloads new works from the Pixiv artists you choose, skipping anything already downloaded; optionally pushes each sync summary to QQ.",
     "detail": "docs/DETAIL.md"
   }
 }

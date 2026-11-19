@@ -7,6 +7,8 @@
  *   node cli.js sync --full     补历史缺口
  *   node cli.js status          查看统计
  *   node cli.js adopt           扫描输出目录补记录
+ *
+ * sync 结束后如果 notify.json 里配了 QQ 推送，会顺带把摘要发到 QQ。
  */
 
 import {
@@ -18,6 +20,7 @@ import {
   status,
   sync,
 } from './lib/engine.js'
+import { pushSyncResult } from './lib/notify.js'
 
 function parseArgs(argv) {
   const out = { _: [] }
@@ -86,6 +89,12 @@ async function main() {
   )
   // 机器可读的一行，方便定时任务提取
   console.log('RESULT ' + JSON.stringify(result))
+
+  // 命令行跑完也推一份（没配推送时直接跳过）
+  const pushed = await pushSyncResult(dir, { mode: 'cli', result, log: quiet ? () => {} : (m) => console.log(m) })
+  if (pushed?.skipped === false) {
+    console.log(pushed.ok ? 'QQ 推送：已发送' : `QQ 推送失败：${pushed.errors.join(' | ')}`)
+  }
   if (result.failed > 0) process.exitCode = 2
 }
 
